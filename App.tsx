@@ -1,19 +1,28 @@
 import { useState } from 'react';
-import { StyleSheet, Text, View, Button, Image, ActivityIndicator, Alert } from 'react-native';
+import { StyleSheet, Text, View, Button, Image, ActivityIndicator, Alert, TextInput, ScrollView, Keyboard } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { supabase } from './lib/supabase'; // Import the file you just made
+import { supabase } from './lib/supabase';
 
 export default function App() {
+  // Modes: 'capture' or 'search'
+  const [mode, setMode] = useState<'capture' | 'search'>('capture');
+  
+  // Capture State
   const [image, setImage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  // 1. Pick Image
+  // Search State
+  const [query, setQuery] = useState('');
+  const [searchResult, setSearchResult] = useState<any>(null);
+  const [searching, setSearching] = useState(false);
+
+  // --- CAPTURE LOGIC (From Day 1) ---
   const pickImage = async () => {
     let result = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
-      quality: 0.5, // Keep quality low for MVP speed
-      base64: true, // Needed for upload
+      quality: 0.5,
+      base64: true,
     });
 
     if (!result.canceled) {
@@ -22,80 +31,93 @@ export default function App() {
     }
   };
 
-  // 2. Upload to Supabase
   const uploadToSupabase = async (photo: any) => {
     setUploading(true);
     try {
-      // FIX: Create a FormData object. This is the standard way to send files on Mobile.
       const formData = new FormData();
-      formData.append('file', {
-        uri: photo.uri,
-        name: 'photo.jpg',
-        type: 'image/jpeg',
-      } as any);
-
+      formData.append('file', { uri: photo.uri, name: 'photo.jpg', type: 'image/jpeg' } as any);
       const fileName = `${Date.now()}.jpg`;
 
-      // A. Upload using the standard fetch API, bypassing Supabase JS client for the upload part
-      // (This is often more stable for file uploads on Expo)
-      const { data, error } = await supabase.storage
-        .from('images')
-        .upload(fileName, formData, {
-          contentType: 'multipart/form-data',
-        });
-
-      if (error) {
-        console.error("Supabase Storage Error:", error);
-        throw error;
-      }
-
-      // B. Get the Public URL
-      const { data: urlData } = supabase.storage
-        .from('images')
-        .getPublicUrl(fileName);
-
-      console.log("Image URL:", urlData.publicUrl);
-
-      // C. Save Reference to Database
-      const { error: dbError } = await supabase
-        .from('scans')
-        .insert([{ image_url: urlData.publicUrl }]);
-
-      if (dbError) {
-        console.error("Database Error:", dbError);
-        throw dbError;
-      }
-
-      Alert.alert("Success!", "Image uploaded and database updated.");
-
+      await supabase.storage.from('images').upload(fileName, formData, { contentType: 'multipart/form-data' });
+      const { data: urlData } = supabase.storage.from('images').getPublicUrl(fileName);
+      
+      await supabase.from('scans').insert([{ image_url: urlData.publicUrl }]);
+      Alert.alert("Saved!", "I'm analyzing this photo now. Check back in 10 seconds.");
+      setImage(null);
     } catch (e: any) {
-      console.error("Full Error Details:", e);
-      Alert.alert("Upload Failed", e.message || "Unknown error");
+      Alert.alert("Error", e.message);
     } finally {
       setUploading(false);
     }
   };
 
+  // --- SEARCH LOGIC (New for Day 3) ---
+  const handleSearch = async () => {
+    if (!query.trim()) return;
+    setSearching(true);
+    setSearchResult(null);
+    Keyboard.dismiss();
+
+    try {
+      const { data, error } = await supabase.functions.invoke('search-items', {
+        body: { query: query }
+      });
+
+      if (error) throw error;
+      setSearchResult(data);
+    } catch (e: any) {
+      Alert.alert("Search Error", e.message);
+    } finally {
+      setSearching(false);
+    }
+  };
+
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Visual Memory MVP</Text>
-      
-      {image && <Image source={{ uri: image }} style={styles.preview} />}
-      
-      <View style={styles.buttonContainer}>
-        {uploading ? (
-          <ActivityIndicator size="large" color="#0000ff" />
-        ) : (
-          <Button title="Take Photo" onPress={pickImage} />
-        )}
+      <View style={styles.nav}>
+        <Button title="📸 Capture" onPress={() => setMode('capture')} />
+        <Button title="🔍 Search" onPress={() => setMode('search')} />
       </View>
+
+      {mode === 'capture' ? (
+        <View style={styles.centerView}>
+          <Text style={styles.title}>Visual Memory</Text>
+          <Text style={styles.subtitle}>Snap photos of your stuff.</Text>
+          {uploading ? <ActivityIndicator size="large" /> : <Button title="Take Photo" onPress={pickImage} />}
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.centerView}>
+          <Text style={styles.title}>Ask Recall</Text>
+          <TextInput 
+            style={styles.input} 
+            placeholder="e.g., Where are my keys?" 
+            value={query}
+            onChangeText={setQuery} 
+          />
+          <Button title={searching ? "Searching..." : "Ask AI"} onPress={handleSearch} disabled={searching} />
+          
+          {searchResult && (
+            <View style={styles.resultContainer}>
+              <Text style={styles.answerText}>{searchResult.answer}</Text>
+              {searchResult.image && (
+                <Image source={{ uri: searchResult.image }} style={styles.resultImage} />
+              )}
+            </View>
+          )}
+        </ScrollView>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 20 },
-  preview: { width: 300, height: 300, marginBottom: 20, borderRadius: 10 },
-  buttonContainer: { marginTop: 10 },
+  container: { flex: 1, backgroundColor: '#fff', paddingTop: 50 },
+  nav: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 20 },
+  centerView: { alignItems: 'center', padding: 20 },
+  title: { fontSize: 28, fontWeight: 'bold', marginBottom: 10 },
+  subtitle: { fontSize: 16, color: '#666', marginBottom: 30 },
+  input: { width: '100%', height: 50, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 15 },
+  resultContainer: { marginTop: 30, alignItems: 'center', width: '100%' },
+  answerText: { fontSize: 18, marginBottom: 15, textAlign: 'center' },
+  resultImage: { width: 300, height: 300, borderRadius: 10, borderWidth: 2, borderColor: '#000' }
 });
