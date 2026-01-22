@@ -20,7 +20,7 @@ export default function App() {
   const pickImage = async () => {
     let result = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
+      allowsEditing: false,
       quality: 0.5,
       base64: true,
     });
@@ -100,7 +100,7 @@ export default function App() {
             <View style={styles.resultContainer}>
               <Text style={styles.answerText}>{searchResult.answer}</Text>
               {searchResult.image && (
-                <Image source={{ uri: searchResult.image }} style={styles.resultImage} />
+                <Image source={{ uri: searchResult.image }} style={styles.resultImage} resizeMode="contain" />
               )}
             </View>
           )}
@@ -119,5 +119,5 @@ const styles = StyleSheet.create({
   input: { width: '100%', height: 50, borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 10, marginBottom: 15 },
   resultContainer: { marginTop: 30, alignItems: 'center', width: '100%' },
   answerText: { fontSize: 18, marginBottom: 15, textAlign: 'center' },
-  resultImage: { width: 300, height: 300, borderRadius: 10, borderWidth: 2, borderColor: '#000' }
+  resultImage: { width: 300, height: 400, borderRadius: 10, borderWidth: 2, borderColor: '#000' }
 });
