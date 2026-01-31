@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.90.1",
-    "expo": "~54.0.31",
+    "expo": "~54.0.32",
     "expo-camera": "~17.0.10",
     "expo-image-picker": "~17.0.10",
     "expo-status-bar": "~3.0.9",
