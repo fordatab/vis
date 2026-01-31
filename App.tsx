@@ -42,7 +42,7 @@ export default function App() {
       const { data: urlData } = supabase.storage.from('images').getPublicUrl(fileName);
       
       await supabase.from('scans').insert([{ image_url: urlData.publicUrl }]);
-      Alert.alert("Saved!", "I'm analyzing this photo now. Check back in 10 seconds.");
+      Alert.alert("Saved!", "I'm analyzing this photo now. Check back in 5 seconds.");
       setImage(null);
     } catch (e: any) {
       Alert.alert("Error", e.message);
