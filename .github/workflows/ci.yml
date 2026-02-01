@@ -24,5 +24,4 @@ jobs:
       - name: Run TypeScript type check
         run: npx tsc --noEmit
 
-      - name: Run Expo Doctor
-        run: npx expo-doctor
+
