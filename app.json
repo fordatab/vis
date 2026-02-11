@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "visual-memory",
-    "slug": "visual-memory",
+    "slug": "vis",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
