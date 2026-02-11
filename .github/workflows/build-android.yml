@@ -24,4 +24,15 @@ jobs:
         run: npm install
 
       - name: Build APK
-        run: eas build --platform android --profile preview --non-interactive
+        run: eas build --platform android --profile preview --non-interactive --json > build.json
+
+      - name: Download APK from EAS
+        run: |
+          APK_URL=$(jq -r '.[0].artifacts.buildUrl' build.json)
+          curl -L -o app.apk "$APK_URL"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: app.apk
