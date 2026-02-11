@@ -7,21 +7,6 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
 const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
-// Cosine similarity between two vectors
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (!a || !b || a.length !== b.length || a.length === 0) return 0;
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-  if (normA === 0 || normB === 0) return 0;
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-}
-
 Deno.serve(async (req) => {
   try {
     const { query, room } = await req.json();
@@ -67,7 +52,7 @@ Deno.serve(async (req) => {
     const queryVector = embeddingData.data[0].embedding;
     const itemVector = embeddingData.data[1].embedding;
 
-    // 3a. Scene-level vector similarity search (original approach)
+    // 3a. Scene-level vector similarity search
     const { data: vectorImages, error: vectorError } = await supabase.rpc('match_images', {
       query_embedding: queryVector,
       match_threshold: 0.1,
@@ -77,75 +62,40 @@ Deno.serve(async (req) => {
 
     if (vectorError) throw vectorError;
 
-    // 3b. Semantic object-level search using object embeddings
-    // Fetch recent scans with detected_objects
-    let objectQuery = supabase
-      .from('scans')
-      .select('id, image_url, description, room_label, detected_objects')
-      .not('detected_objects', 'is', null)
-      .order('created_at', { ascending: false })
-      .limit(50);
+    // 3b. Object-level semantic search using database function
+    const { data: objectMatches, error: objectError } = await supabase.rpc('match_objects', {
+      query_embedding: itemVector,
+      match_threshold: 0.5,
+      match_count: 5,
+      room_filter: roomFilter
+    });
 
-    if (roomFilter) {
-      objectQuery = objectQuery.eq('room_label', roomFilter);
+    if (objectError) {
+      console.error("match_objects error:", objectError);
+      // Continue without object matches if function doesn't exist yet
     }
 
-    const { data: scansWithObjects } = await objectQuery;
-
-    // Find scans where any object embedding is semantically similar to the search item
-    const OBJECT_SIMILARITY_THRESHOLD = 0.5;  // Tune this threshold
-    const semanticMatches: { scan: any; bestMatch: string; similarity: number }[] = [];
-
-    if (scansWithObjects) {
-      for (const scan of scansWithObjects) {
-        if (Array.isArray(scan.detected_objects)) {
-          let bestMatchLabel = '';
-          let bestSimilarity = 0;
-
-          for (const obj of scan.detected_objects) {
-            if (obj.embedding && Array.isArray(obj.embedding)) {
-              const similarity = cosineSimilarity(itemVector, obj.embedding);
-              if (similarity > bestSimilarity) {
-                bestSimilarity = similarity;
-                bestMatchLabel = obj.label;
-              }
-            }
-          }
-
-          if (bestSimilarity >= OBJECT_SIMILARITY_THRESHOLD) {
-            semanticMatches.push({
-              scan,
-              bestMatch: bestMatchLabel,
-              similarity: bestSimilarity
-            });
-          }
-        }
-      }
+    console.log(`Object search found ${objectMatches?.length || 0} matches`);
+    if (objectMatches?.length > 0) {
+      console.log(`Best match: "${objectMatches[0].matched_object}" with similarity ${objectMatches[0].similarity?.toFixed(3)}`);
     }
 
-    // Sort semantic matches by similarity (best first)
-    semanticMatches.sort((a, b) => b.similarity - a.similarity);
-    console.log(`Semantic object search found ${semanticMatches.length} matches above threshold ${OBJECT_SIMILARITY_THRESHOLD}`);
-    if (semanticMatches.length > 0) {
-      console.log(`Best match: "${semanticMatches[0].bestMatch}" with similarity ${semanticMatches[0].similarity.toFixed(3)}`);
-    }
-
-    // Merge results: prioritize semantic object matches, then vector matches
+    // Merge results: prioritize object matches, then scene matches
     const seenIds = new Set<string>();
     const images: any[] = [];
 
-    // Add semantic matches first (most precise for item searches)
-    for (const match of semanticMatches) {
-      if (!seenIds.has(match.scan.id) && images.length < 5) {
-        seenIds.add(match.scan.id);
+    // Add object matches first (most precise for item searches)
+    for (const match of (objectMatches || [])) {
+      if (!seenIds.has(match.id) && images.length < 5) {
+        seenIds.add(match.id);
         // Add the matched object info for context
-        match.scan._matchedObject = match.bestMatch;
-        match.scan._matchSimilarity = match.similarity;
-        images.push(match.scan);
+        match._matchedObject = match.matched_object;
+        match._matchSimilarity = match.similarity;
+        images.push(match);
       }
     }
 
-    // Then add vector search results
+    // Then add scene-level vector search results
     for (const img of (vectorImages || [])) {
       if (!seenIds.has(img.id) && images.length < 5) {
         seenIds.add(img.id);
@@ -156,7 +106,7 @@ Deno.serve(async (req) => {
     if (images.length === 0) {
       return new Response(JSON.stringify({ answer: "No matching items found.", image: null }), { headers: { "Content-Type": "application/json" } });
     }
-
+    
     // --- THE HYBRID CONTEXT ---
     // We format the text so GPT-4o sees BOTH its own description AND Qwen3-VL's object list
     const descriptionsContext = images.map((img: any, index: number) => {
