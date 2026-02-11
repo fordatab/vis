@@ -4,7 +4,7 @@ on:
   workflow_dispatch:  # Allows manual trigger from GitHub UI
   push:
     branches:
-      - main
+      - master
     paths:
       - 'supabase/functions/**' # Only run if backend code changes
 
